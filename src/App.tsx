@@ -19,10 +19,15 @@ function App() {
   }
 
   function joinRoom() {
-    const code = roomCode.trim()
+    const code = roomCode.trim().toUpperCase()
 
-    if (code.length < 4) {
-      setError('Enter a room code with at least 4 characters.')
+    if (!code) {
+      setError('Please enter a room code.')
+      return
+    }
+
+    if (!/^[A-Z0-9]{4,8}$/.test(code)) {
+      setError('Room codes must contain 4–8 letters or numbers.')
       return
     }
 
@@ -71,31 +76,46 @@ function App() {
               <div className="h-px flex-1 bg-plum/15" />
             </div>
 
-            <RoomCodeInput
-              value={roomCode}
-              onChange={(value) => {
-                setRoomCode(value)
-                setError('')
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                joinRoom()
               }}
-              aria-label="Room code"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') joinRoom()
-              }}
-            />
-
-            <Button
-              variant="secondary"
-              disabled={roomCode.trim().length < 4}
-              onClick={joinRoom}
+              className="flex flex-col gap-4"
             >
-              Join Room
-            </Button>
+              <RoomCodeInput
+                value={roomCode}
+                onChange={(value) => {
+                  setRoomCode(value)
+                  setError('')
+                }}
+                aria-label="Room code"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? 'room-code-error' : undefined}
+              />
 
-            {error && (
-              <p role="alert" className="text-sm text-red-700">
-                {error}
-              </p>
-            )}
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={!roomCode.trim()}
+              >
+                Join Room
+              </Button>
+
+              {error && (
+                <p
+                  id="room-code-error"
+                  role="alert"
+                  className="text-sm text-red-700"
+                >
+                  {error}
+                </p>
+              )}
+            </form>
+
+            <p className="text-xs leading-5 text-plum-muted">
+              Room codes can contain 4–8 letters or numbers.
+            </p>
           </div>
         </section>
       </div>
