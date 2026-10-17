@@ -22,16 +22,49 @@ function getCurrentTime() {
   })
 }
 
-function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
-  const [message, setMessage] = useState('')
-  const [messages, setMessages] = useState<Message[]>([
+function getStorageKey(roomCode: string) {
+  return `chatty-messages-${roomCode}`
+}
+
+function loadMessages(roomCode: string): Message[] {
+  try {
+    const savedMessages = localStorage.getItem(getStorageKey(roomCode))
+
+    if (savedMessages) {
+      const parsed: unknown = JSON.parse(savedMessages)
+
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (item): item is Message =>
+            item !== null &&
+            typeof item === 'object' &&
+            typeof item.id === 'number' &&
+            typeof item.text === 'string' &&
+            (item.sender === 'you' || item.sender === 'friend') &&
+            typeof item.time === 'string',
+        )
+      }
+    }
+  } catch {
+    // Stored data may be unavailable or invalid.
+  }
+
+  return [
     {
       id: 1,
       text: 'Welcome to the room! 👋',
       sender: 'friend',
       time: getCurrentTime(),
     },
-  ])
+  ]
+}
+
+function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
+  const [messages, setMessages] = useState<Message[]>(() =>
+    loadMessages(roomCode),
+  )
+  const [message, setMessage] = useState('')
+  const [copyLabel, setCopyLabel] = useState('Copy code')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sentCount = messages.filter(
@@ -39,17 +72,29 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   ).length
 
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        getStorageKey(roomCode),
+        JSON.stringify(messages),
+      )
+    } catch {
+      // The chat still works if storage is unavailable.
+    }
+  }, [messages, roomCode])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+
     const text = message.trim()
 
     if (!text) return
 
-    setMessages((current) => [
-      ...current,
+    setMessages((currentMessages) => [
+      ...currentMessages,
       {
         id: Date.now(),
         text,
@@ -64,8 +109,12 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   async function copyRoomCode() {
     try {
       await navigator.clipboard.writeText(roomCode)
+      setCopyLabel('Copied!')
+
+      window.setTimeout(() => setCopyLabel('Copy code'), 1500)
     } catch {
-      // Clipboard access may be unavailable.
+      setCopyLabel('Copy unavailable')
+      window.setTimeout(() => setCopyLabel('Copy code'), 1500)
     }
   }
 
@@ -105,12 +154,13 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             <span className="text-xs text-plum-soft sm:text-sm">
               {sentCount} {sentCount === 1 ? 'message sent' : 'messages sent'}
             </span>
+
             <button
               type="button"
               onClick={copyRoomCode}
-              className="rounded-lg border border-plum/20 px-3 py-2 text-sm font-medium hover:bg-plum-light"
+              className="rounded-lg border border-plum/20 px-3 py-2 text-sm font-medium transition hover:bg-plum-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
             >
-              Copy code
+              {copyLabel}
             </button>
           </div>
         </section>
@@ -121,7 +171,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6 sm:px-8"
         >
           <p className="text-center text-xs text-plum-muted">
-            This is the beginning of your conversation.
+            Your messages are saved in this browser.
           </p>
 
           {messages.map((item) => {
@@ -142,6 +192,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                   >
                     {item.text}
                   </div>
+
                   <p
                     className={`mt-1 text-xs text-plum-muted ${
                       isYou ? 'text-right' : 'text-left'
