@@ -5,17 +5,40 @@ import ChatRoom from './components/ChatRoom'
 import RoomCodeInput from './components/RoomCodeInput'
 
 function generateRoomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase()
+  const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const values = new Uint32Array(6)
+  crypto.getRandomValues(values)
+
+  return Array.from(
+    values,
+    (value) => characters[value % characters.length],
+  ).join('')
+}
+
+function getInitialRoomCode() {
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('room')?.toUpperCase() ?? ''
+
+  return /^[A-Z0-9]{4,8}$/.test(code) ? code : null
 }
 
 function App() {
   const [roomCode, setRoomCode] = useState('')
-  const [activeRoom, setActiveRoom] = useState<string | null>(null)
+  const [activeRoom, setActiveRoom] = useState<string | null>(
+    getInitialRoomCode,
+  )
   const [error, setError] = useState('')
 
-  function createRoom() {
+  function openRoom(code: string) {
+    const url = new URL(window.location.href)
+    url.searchParams.set('room', code)
+    window.history.pushState({}, '', url)
+    setActiveRoom(code)
     setError('')
-    setActiveRoom(generateRoomCode())
+  }
+
+  function createRoom() {
+    openRoom(generateRoomCode())
   }
 
   function joinRoom() {
@@ -31,21 +54,20 @@ function App() {
       return
     }
 
+    openRoom(code)
+  }
+
+  function leaveRoom() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('room')
+    window.history.pushState({}, '', url)
+    setActiveRoom(null)
+    setRoomCode('')
     setError('')
-    setActiveRoom(code)
   }
 
   if (activeRoom) {
-    return (
-      <ChatRoom
-        roomCode={activeRoom}
-        onLeave={() => {
-          setActiveRoom(null)
-          setRoomCode('')
-          setError('')
-        }}
-      />
-    )
+    return <ChatRoom roomCode={activeRoom} onLeave={leaveRoom} />
   }
 
   return (
@@ -91,23 +113,14 @@ function App() {
                 }}
                 aria-label="Room code"
                 aria-invalid={Boolean(error)}
-                aria-describedby={error ? 'room-code-error' : undefined}
               />
 
-              <Button
-                type="submit"
-                variant="secondary"
-                disabled={!roomCode.trim()}
-              >
+              <Button type="submit" variant="secondary" disabled={!roomCode.trim()}>
                 Join Room
               </Button>
 
               {error && (
-                <p
-                  id="room-code-error"
-                  role="alert"
-                  className="text-sm text-red-700"
-                >
+                <p role="alert" className="text-sm text-red-700">
                   {error}
                 </p>
               )}

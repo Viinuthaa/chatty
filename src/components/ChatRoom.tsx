@@ -28,10 +28,10 @@ function getStorageKey(roomCode: string) {
 
 function loadMessages(roomCode: string): Message[] {
   try {
-    const savedMessages = localStorage.getItem(getStorageKey(roomCode))
+    const saved = localStorage.getItem(getStorageKey(roomCode))
 
-    if (savedMessages) {
-      const parsed: unknown = JSON.parse(savedMessages)
+    if (saved) {
+      const parsed: unknown = JSON.parse(saved)
 
       if (Array.isArray(parsed)) {
         return parsed.filter(
@@ -46,7 +46,7 @@ function loadMessages(roomCode: string): Message[] {
       }
     }
   } catch {
-    // Stored data may be unavailable or invalid.
+    // Ignore unavailable or invalid stored data.
   }
 
   return [
@@ -64,12 +64,10 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     loadMessages(roomCode),
   )
   const [message, setMessage] = useState('')
-  const [copyLabel, setCopyLabel] = useState('Copy code')
+  const [copyLabel, setCopyLabel] = useState('Share invite link')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const sentCount = messages.filter(
-    (item) => item.sender === 'you',
-  ).length
+  const sentCount = messages.filter((item) => item.sender === 'you').length
 
   useEffect(() => {
     try {
@@ -78,7 +76,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         JSON.stringify(messages),
       )
     } catch {
-      // The chat still works if storage is unavailable.
+      // Messages remain usable for the current session.
     }
   }, [messages, roomCode])
 
@@ -88,13 +86,12 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-
     const text = message.trim()
 
     if (!text) return
 
-    setMessages((currentMessages) => [
-      ...currentMessages,
+    setMessages((current) => [
+      ...current,
       {
         id: Date.now(),
         text,
@@ -106,16 +103,33 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     setMessage('')
   }
 
-  async function copyRoomCode() {
-    try {
-      await navigator.clipboard.writeText(roomCode)
-      setCopyLabel('Copied!')
+  async function shareInvite() {
+    const inviteUrl = new URL(window.location.href)
+    inviteUrl.searchParams.set('room', roomCode)
+    const link = inviteUrl.toString()
 
-      window.setTimeout(() => setCopyLabel('Copy code'), 1500)
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Join my Chatty room',
+          text: `Join my Chatty room with code ${roomCode}`,
+          url: link,
+        })
+        setCopyLabel('Invite shared!')
+      } else {
+        await navigator.clipboard.writeText(link)
+        setCopyLabel('Link copied!')
+      }
     } catch {
-      setCopyLabel('Copy unavailable')
-      window.setTimeout(() => setCopyLabel('Copy code'), 1500)
+      try {
+        await navigator.clipboard.writeText(link)
+        setCopyLabel('Link copied!')
+      } catch {
+        setCopyLabel('Unable to share')
+      }
     }
+
+    window.setTimeout(() => setCopyLabel('Share invite link'), 2000)
   }
 
   return (
@@ -157,7 +171,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
             <button
               type="button"
-              onClick={copyRoomCode}
+              onClick={shareInvite}
               className="rounded-lg border border-plum/20 px-3 py-2 text-sm font-medium transition hover:bg-plum-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
             >
               {copyLabel}
@@ -192,7 +206,6 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                   >
                     {item.text}
                   </div>
-
                   <p
                     className={`mt-1 text-xs text-plum-muted ${
                       isYou ? 'text-right' : 'text-left'
