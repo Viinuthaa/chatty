@@ -64,10 +64,12 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     loadMessages(roomCode),
   )
   const [message, setMessage] = useState('')
-  const [copyLabel, setCopyLabel] = useState('Share invite link')
+  const [shareLabel, setShareLabel] = useState('Share invite link')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const sentCount = messages.filter((item) => item.sender === 'you').length
+  const sentCount = messages.filter(
+    (item) => item.sender === 'you',
+  ).length
 
   useEffect(() => {
     try {
@@ -76,7 +78,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         JSON.stringify(messages),
       )
     } catch {
-      // Messages remain usable for the current session.
+      // Keep the chat usable if browser storage is unavailable.
     }
   }, [messages, roomCode])
 
@@ -115,66 +117,66 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           text: `Join my Chatty room with code ${roomCode}`,
           url: link,
         })
-        setCopyLabel('Invite shared!')
+        setShareLabel('Invite shared!')
       } else {
         await navigator.clipboard.writeText(link)
-        setCopyLabel('Link copied!')
+        setShareLabel('Link copied!')
       }
     } catch {
       try {
         await navigator.clipboard.writeText(link)
-        setCopyLabel('Link copied!')
+        setShareLabel('Link copied!')
       } catch {
-        setCopyLabel('Unable to share')
+        setShareLabel('Unable to share')
       }
     }
 
-    window.setTimeout(() => setCopyLabel('Share invite link'), 2000)
+    window.setTimeout(() => setShareLabel('Share invite link'), 2000)
   }
 
   return (
-    <main className="min-h-screen bg-milk p-4 text-plum sm:p-8">
-      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl flex-col overflow-hidden rounded-2xl border border-plum/10 bg-white/70 shadow-sm sm:min-h-[calc(100vh-4rem)]">
-        <header className="flex items-center justify-between gap-4 border-b border-plum/10 px-5 py-5 sm:px-8">
-          <div>
+    <main className="h-[100dvh] overflow-hidden bg-milk p-0 text-plum sm:p-4 lg:p-8">
+      <div className="mx-auto flex h-full min-h-0 max-w-5xl flex-col overflow-hidden border-x border-plum/10 bg-white/70 shadow-sm sm:rounded-2xl sm:border">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-plum/10 px-4 py-3 sm:gap-4 sm:px-8 sm:py-5">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
               Chatty
             </h1>
-            <p className="mt-1 text-sm text-plum-soft">
+            <p className="mt-1 hidden text-sm text-plum-soft sm:block">
               Your little corner of the internet.
             </p>
           </div>
 
           <Button
             variant="secondary"
-            className="w-auto shrink-0 px-4 py-2.5 text-sm"
+            className="w-auto shrink-0 px-3 py-2 text-sm sm:px-4 sm:py-2.5"
             onClick={onLeave}
           >
             Leave room
           </Button>
         </header>
 
-        <section className="flex flex-wrap items-center justify-between gap-3 border-b border-plum/10 bg-plum-light/40 px-5 py-4 sm:px-8">
+        <section className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-plum/10 bg-plum-light/40 px-4 py-3 sm:gap-3 sm:px-8 sm:py-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-plum-soft">
               Room code
             </p>
-            <p className="mt-1 font-mono text-lg font-bold tracking-[0.2em]">
+            <p className="mt-1 font-mono text-base font-bold tracking-[0.2em] sm:text-lg">
               {roomCode}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <span className="text-xs text-plum-soft sm:text-sm">
-              {sentCount} {sentCount === 1 ? 'message sent' : 'messages sent'}
+              {sentCount} {sentCount === 1 ? 'message' : 'messages'} sent
             </span>
 
             <button
               type="button"
               onClick={shareInvite}
-              className="rounded-lg border border-plum/20 px-3 py-2 text-sm font-medium transition hover:bg-plum-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
+              className="rounded-lg border border-plum/20 px-3 py-2 text-xs font-medium transition hover:bg-plum-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted sm:text-sm"
             >
-              {copyLabel}
+              {shareLabel}
             </button>
           </div>
         </section>
@@ -182,7 +184,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         <section
           aria-label="Chat messages"
           aria-live="polite"
-          className="flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-6 sm:px-8"
+          className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6"
         >
           <p className="text-center text-xs text-plum-muted">
             Your messages are saved in this browser.
@@ -194,11 +196,13 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             return (
               <div
                 key={item.id}
-                className={`flex ${isYou ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${
+                  isYou ? 'justify-end' : 'justify-start'
+                }`}
               >
-                <div className="max-w-[85%] sm:max-w-[70%]">
+                <div className="max-w-[88%] sm:max-w-[70%]">
                   <div
-                    className={`break-words rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
+                    className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
                       isYou
                         ? 'rounded-br-sm bg-plum text-milk'
                         : 'rounded-bl-sm bg-plum-light text-plum'
@@ -206,6 +210,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                   >
                     {item.text}
                   </div>
+
                   <p
                     className={`mt-1 text-xs text-plum-muted ${
                       isYou ? 'text-right' : 'text-left'
@@ -223,9 +228,9 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
         <form
           onSubmit={sendMessage}
-          className="border-t border-plum/10 bg-white/60 p-4 sm:p-6"
+          className="shrink-0 border-t border-plum/10 bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-6"
         >
-          <div className="flex w-full items-center gap-3">
+          <div className="flex w-full items-center gap-2 sm:gap-3">
             <input
               type="text"
               value={message}
@@ -234,19 +239,19 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
               aria-label="Write a message"
               maxLength={1000}
               style={{ width: '100%', flex: '1 1 0%', minWidth: 0 }}
-              className="rounded-xl border border-plum/20 bg-milk px-4 py-3 text-sm text-plum outline-none placeholder:text-plum-soft/70 focus:border-plum focus:ring-2 focus:ring-plum/10 sm:text-base"
+              className="rounded-xl border border-plum/20 bg-milk px-3 py-3 text-base text-plum outline-none placeholder:text-plum-soft/70 focus:border-plum focus:ring-2 focus:ring-plum/10 sm:px-4"
             />
 
             <Button
               type="submit"
               disabled={!message.trim()}
-              className="w-auto shrink-0 px-5 py-3"
+              className="w-auto shrink-0 px-4 py-3 sm:px-5"
             >
               Send
             </Button>
           </div>
 
-          <p className="mt-3 text-center text-xs text-plum-muted">
+          <p className="mt-2 hidden text-center text-xs text-plum-muted sm:block">
             A simple space to talk, without the noise.
           </p>
         </form>
