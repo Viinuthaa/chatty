@@ -30,7 +30,7 @@ function loadMessages(roomCode: string): Message[] {
   try {
     const saved = localStorage.getItem(getStorageKey(roomCode))
 
-    if (saved) {
+    if (saved !== null) {
       const parsed: unknown = JSON.parse(saved)
 
       if (Array.isArray(parsed)) {
@@ -78,7 +78,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         JSON.stringify(messages),
       )
     } catch {
-      // Keep the chat usable if browser storage is unavailable.
+      // Keep the current conversation usable without storage.
     }
   }, [messages, roomCode])
 
@@ -88,8 +88,8 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const text = message.trim()
 
+    const text = message.trim()
     if (!text) return
 
     setMessages((current) => [
@@ -103,6 +103,24 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     ])
 
     setMessage('')
+  }
+
+  function deleteMessage(id: number) {
+    setMessages((current) =>
+      current.filter((item) => item.id !== id),
+    )
+  }
+
+  function clearChat() {
+    if (messages.length === 0) return
+
+    const confirmed = window.confirm(
+      'Clear all messages in this room on this browser? This cannot be undone.',
+    )
+
+    if (confirmed) {
+      setMessages([])
+    }
   }
 
   async function shareInvite() {
@@ -186,42 +204,76 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           aria-live="polite"
           className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6"
         >
-          <p className="text-center text-xs text-plum-muted">
-            Your messages are saved in this browser.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-plum-muted">
+              Messages are saved in this browser.
+            </p>
 
-          {messages.map((item) => {
-            const isYou = item.sender === 'you'
-
-            return (
-              <div
-                key={item.id}
-                className={`flex ${
-                  isYou ? 'justify-end' : 'justify-start'
-                }`}
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={clearChat}
+                className="rounded-md px-2 py-1 text-xs font-medium text-plum-soft underline decoration-plum/30 underline-offset-4 transition hover:text-plum focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
               >
-                <div className="max-w-[88%] sm:max-w-[70%]">
-                  <div
-                    className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
-                      isYou
-                        ? 'rounded-br-sm bg-plum text-milk'
-                        : 'rounded-bl-sm bg-plum-light text-plum'
-                    }`}
-                  >
-                    {item.text}
-                  </div>
+                Clear chat
+              </button>
+            )}
+          </div>
 
-                  <p
-                    className={`mt-1 text-xs text-plum-muted ${
-                      isYou ? 'text-right' : 'text-left'
-                    }`}
-                  >
-                    {isYou ? 'You' : 'Friend'} · {item.time}
-                  </p>
+          {messages.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+              <p className="text-lg font-semibold">It's quiet in here.</p>
+              <p className="mt-2 max-w-xs text-sm leading-6 text-plum-soft">
+                Your conversation is empty. Send a message to get things started.
+              </p>
+            </div>
+          ) : (
+            messages.map((item) => {
+              const isYou = item.sender === 'you'
+
+              return (
+                <div
+                  key={item.id}
+                  className={`flex ${
+                    isYou ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  <div className="max-w-[88%] sm:max-w-[70%]">
+                    <div
+                      className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
+                        isYou
+                          ? 'rounded-br-sm bg-plum text-milk'
+                          : 'rounded-bl-sm bg-plum-light text-plum'
+                      }`}
+                    >
+                      {item.text}
+                    </div>
+
+                    <div
+                      className={`mt-1 flex items-center gap-2 text-xs text-plum-muted ${
+                        isYou ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      <span>
+                        {isYou ? 'You' : 'Friend'} · {item.time}
+                      </span>
+
+                      {isYou && (
+                        <button
+                          type="button"
+                          onClick={() => deleteMessage(item.id)}
+                          aria-label={`Delete message: ${item.text}`}
+                          className="rounded px-1 py-0.5 underline decoration-plum/30 underline-offset-2 transition hover:text-plum focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })
+          )}
 
           <div ref={messagesEndRef} />
         </section>
