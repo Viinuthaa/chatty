@@ -8,6 +8,16 @@ type Message = {
   id: string
   text: string
   sender: string
+  senderId?: string
+  createdAt: string
+}
+
+type ServerMessage = {
+  id: string
+  roomCode: string
+  text: string
+  senderId: string
+  senderName: string
   createdAt: string
 }
 
@@ -20,16 +30,34 @@ type ServerToClientEvents = {
   'room:joined': (data: { roomCode: string }) => void
   'room:members': (data: { count: number }) => void
   'room:error': (message: string) => void
+  'message:new': (message: ServerMessage) => void
 }
 
 type ClientToServerEvents = {
-  'room:join': (roomCode: string) => void
+  'room:join': (data: { roomCode: string; senderName: string }) => void
   'room:leave': (roomCode: string) => void
+  'message:send': (
+    message: { id: string; text: string; senderId: string },
+    callback?: (result: { ok: boolean; error?: string }) => void,
+  ) => void
 }
 
 type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
 const SERVER_URL = 'http://localhost:3001'
+const NAME_KEY = 'chatty-display-name'
+
+function getSenderId() {
+  const key = 'chatty-sender-id'
+  let id = localStorage.getItem(key)
+
+  if (!id) {
+    id = crypto.randomUUID()
+    localStorage.setItem(key, id)
+  }
+
+  return id
+}
 
 function loadMessages(roomCode: string): Message[] {
   try {
@@ -51,6 +79,13 @@ function escapeRegExp(value: string) {
 }
 
 function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
+  const [displayName, setDisplayName] = useState(
+    () => localStorage.getItem(NAME_KEY) ?? '',
+  )
+  const [nameInput, setNameInput] = useState(
+    () => localStorage.getItem(NAME_KEY) ?? '',
+  )
+  const [joined, setJoined] = useState(false)
   const [messages, setMessages] = useState<Message[]>(() =>
     loadMessages(roomCode),
   )
@@ -61,6 +96,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   const [memberCount, setMemberCount] = useState(0)
   const [roomError, setRoomError] = useState('')
   const socketRef = useRef<ChatSocket | null>(null)
+  const senderId = useRef(getSenderId()).current
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -70,23 +106,44 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     socket.on('connect', () => {
       setConnectionStatus('Connected')
       setRoomError('')
-      socket.emit('room:join', roomCode)
+      setJoined(false)
     })
 
     socket.on('disconnect', () => {
       setConnectionStatus('Reconnecting…')
       setMemberCount(0)
+      setJoined(false)
     })
 
     socket.on('connect_error', () => {
       setConnectionStatus('Server unavailable')
     })
 
-    socket.on('room:joined', () => setRoomError(''))
+    socket.on('room:joined', () => {
+      setJoined(true)
+      setRoomError('')
+    })
 
     socket.on('room:members', ({ count }) => setMemberCount(count))
-
     socket.on('room:error', setRoomError)
+
+    socket.on('message:new', (incoming) => {
+      if (incoming.roomCode !== roomCode) return
+
+      const received: Message = {
+        id: incoming.id,
+        text: incoming.text,
+        senderId: incoming.senderId,
+        sender: incoming.senderName,
+        createdAt: incoming.createdAt,
+      }
+
+      setMessages((current) =>
+        current.some((item) => item.id === received.id)
+          ? current
+          : [...current, received],
+      )
+    })
 
     return () => {
       if (socket.connected) socket.emit('room:leave', roomCode)
@@ -94,6 +151,15 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
       socketRef.current = null
     }
   }, [roomCode])
+
+  useEffect(() => {
+    if (!joined || !displayName.trim()) return
+
+    socketRef.current?.emit('room:join', {
+      roomCode,
+      senderName: displayName,
+    })
+  }, [displayName, joined, roomCode])
 
   useEffect(() => {
     localStorage.setItem(
@@ -112,21 +178,50 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     onLeave()
   }, [onLeave, roomCode])
 
+  function joinWithName(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const name = nameInput.trim().slice(0, 24)
+    if (!name) {
+      setRoomError('Please enter your display name.')
+      return
+    }
+
+    localStorage.setItem(NAME_KEY, name)
+    setDisplayName(name)
+    setRoomError('')
+
+    const socket = socketRef.current
+    if (socket?.connected) {
+      socket.emit('room:join', { roomCode, senderName: name })
+    } else {
+      setRoomError('Connecting to the server. Please try again shortly.')
+    }
+  }
+
   function sendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const text = message.trim()
-    if (!text) return
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        text,
-        sender: 'You',
-        createdAt: new Date().toISOString(),
+    const text = message.trim()
+    const socket = socketRef.current
+
+    if (!text || !socket?.connected || !joined) {
+      if (!joined) setRoomError('Join the room before sending messages.')
+      return
+    }
+
+    socket.emit(
+      'message:send',
+      { id: crypto.randomUUID(), text, senderId },
+      (result) => {
+        if (!result.ok) {
+          setRoomError(result.error ?? 'Could not send the message.')
+        } else {
+          setRoomError('')
+          setMessage('')
+        }
       },
-    ])
-    setMessage('')
+    )
   }
 
   function deleteMessage(id: string) {
@@ -183,6 +278,67 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
       )
   }
 
+  if (connectionStatus === 'Server unavailable') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-milk px-6 text-plum">
+        <div className="w-full max-w-md rounded-2xl border border-plum/10 bg-white/70 p-8 text-center">
+          <h1 className="text-3xl font-bold">Chatty</h1>
+          <p className="mt-4 text-plum-soft">
+            The chat server is unavailable. Please check your connection.
+          </p>
+          <Button className="mt-6" onClick={onLeave}>
+            Back to home
+          </Button>
+        </div>
+      </main>
+    )
+  }
+
+  if (!joined) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-milk px-6 text-plum">
+        <form
+          onSubmit={joinWithName}
+          className="w-full max-w-md rounded-2xl border border-plum/10 bg-white/70 p-8"
+        >
+          <h1 className="text-4xl font-bold tracking-tight text-center">
+            Chatty
+          </h1>
+          <p className="mt-3 text-center text-plum-soft">
+            You're joining room <strong>{roomCode}</strong>
+          </p>
+          <label htmlFor="display-name" className="mt-8 block text-sm font-medium">
+            What should we call you?
+          </label>
+          <input
+            id="display-name"
+            value={nameInput}
+            onChange={(event) => setNameInput(event.target.value)}
+            placeholder="Enter your name"
+            maxLength={24}
+            autoComplete="nickname"
+            className="mt-2 w-full rounded-xl border border-plum/20 bg-white px-4 py-3 outline-none focus:border-plum"
+          />
+          {roomError && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {roomError}
+            </p>
+          )}
+          <Button type="submit" className="mt-5">
+            Join Room
+          </Button>
+          <button
+            type="button"
+            onClick={onLeave}
+            className="mt-4 w-full text-sm text-plum-soft underline underline-offset-4"
+          >
+            Back to home
+          </button>
+        </form>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-milk px-4 py-5 text-plum sm:px-6 sm:py-8">
       <section className="mx-auto flex h-[calc(100dvh-2.5rem)] max-w-3xl flex-col overflow-hidden rounded-2xl border border-plum/10 bg-white/60 shadow-sm sm:h-[calc(100dvh-4rem)]">
@@ -194,7 +350,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             </p>
             <p className="mt-1 text-xs text-plum-muted">
               {connectionStatus} · {memberCount}{' '}
-              {memberCount === 1 ? 'member' : 'members'}
+              {memberCount === 1 ? 'member' : 'members'} · {displayName}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -265,15 +421,17 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                       {renderMessageText(item.text)}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => deleteMessage(item.id)}
-                    aria-label="Delete message"
-                    title="Delete message"
-                    className="rounded-lg px-2 py-1 text-xs text-plum-soft transition hover:bg-white hover:text-red-700"
-                  >
-                    Delete
-                  </button>
+                  {item.senderId === senderId && (
+                    <button
+                      type="button"
+                      onClick={() => deleteMessage(item.id)}
+                      aria-label="Delete message"
+                      title="Delete message"
+                      className="rounded-lg px-2 py-1 text-xs text-plum-soft transition hover:bg-white hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </article>
             ))
@@ -303,13 +461,13 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             <Button
               type="submit"
               className="w-auto shrink-0 px-4 py-3"
-              disabled={!message.trim()}
+              disabled={!message.trim() || !joined}
             >
               Send
             </Button>
           </form>
           <p className="mt-2 text-center text-xs text-plum-muted">
-            Messages are currently saved only in this browser.
+            Messages are delivered live and saved locally on this device.
           </p>
         </div>
       </section>
