@@ -1,6 +1,6 @@
 
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import Button from './Button'
 
 type ChatRoomProps = {
@@ -59,17 +59,39 @@ function loadMessages(roomCode: string): Message[] {
   ]
 }
 
+function highlightMatch(text: string, query: string): ReactNode {
+  const index = text.toLowerCase().indexOf(query.toLowerCase())
+
+  if (index === -1 || !query) return text
+
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="rounded bg-[#E8C96A] px-0.5 text-plum">
+        {text.slice(index, index + query.length)}
+      </mark>
+      {text.slice(index + query.length)}
+    </>
+  )
+}
+
 function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   const [messages, setMessages] = useState<Message[]>(() =>
     loadMessages(roomCode),
   )
   const [message, setMessage] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [shareLabel, setShareLabel] = useState('Share invite link')
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
   const sentCount = messages.filter(
     (item) => item.sender === 'you',
   ).length
+
+  const filteredMessages = messages.filter((item) =>
+    item.text.toLowerCase().includes(searchQuery.trim().toLowerCase()),
+  )
 
   useEffect(() => {
     try {
@@ -83,8 +105,10 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   }, [messages, roomCode])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (!searchQuery.trim()) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages, searchQuery])
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -103,6 +127,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     ])
 
     setMessage('')
+    setSearchQuery('')
   }
 
   function deleteMessage(id: number) {
@@ -120,6 +145,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
     if (confirmed) {
       setMessages([])
+      setSearchQuery('')
     }
   }
 
@@ -201,8 +227,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
         <section
           aria-label="Chat messages"
-          aria-live="polite"
-          className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-plum-muted">
@@ -220,6 +245,29 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             )}
           </div>
 
+          {messages.length > 0 && (
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search messages..."
+                aria-label="Search messages"
+                className="min-w-0 flex-1 rounded-xl border border-plum/15 bg-white px-4 py-2.5 text-sm text-plum outline-none placeholder:text-plum-soft/70 focus:border-plum focus:ring-2 focus:ring-plum/10"
+              />
+
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="shrink-0 rounded-lg px-3 py-2 text-sm text-plum-soft transition hover:bg-plum-light hover:text-plum"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+
           {messages.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
               <p className="text-lg font-semibold">It's quiet in here.</p>
@@ -227,52 +275,68 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                 Your conversation is empty. Send a message to get things started.
               </p>
             </div>
+          ) : filteredMessages.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+              <p className="text-lg font-semibold">No messages found.</p>
+              <p className="mt-2 text-sm text-plum-soft">
+                Try another word or phrase.
+              </p>
+            </div>
           ) : (
-            messages.map((item) => {
-              const isYou = item.sender === 'you'
+            <>
+              {searchQuery.trim() && (
+                <p className="text-xs text-plum-muted">
+                  {filteredMessages.length}{' '}
+                  {filteredMessages.length === 1 ? 'match' : 'matches'} found
+                </p>
+              )}
 
-              return (
-                <div
-                  key={item.id}
-                  className={`flex ${
-                    isYou ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  <div className="max-w-[88%] sm:max-w-[70%]">
-                    <div
-                      className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
-                        isYou
-                          ? 'rounded-br-sm bg-plum text-milk'
-                          : 'rounded-bl-sm bg-plum-light text-plum'
-                      }`}
-                    >
-                      {item.text}
-                    </div>
+              {filteredMessages.map((item) => {
+                const isYou = item.sender === 'you'
 
-                    <div
-                      className={`mt-1 flex items-center gap-2 text-xs text-plum-muted ${
-                        isYou ? 'justify-end' : 'justify-start'
-                      }`}
-                    >
-                      <span>
-                        {isYou ? 'You' : 'Friend'} · {item.time}
-                      </span>
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex ${
+                      isYou ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div className="max-w-[88%] sm:max-w-[70%]">
+                      <div
+                        className={`break-words whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 sm:text-base ${
+                          isYou
+                            ? 'rounded-br-sm bg-plum text-milk'
+                            : 'rounded-bl-sm bg-plum-light text-plum'
+                        }`}
+                      >
+                        {highlightMatch(item.text, searchQuery.trim())}
+                      </div>
 
-                      {isYou && (
-                        <button
-                          type="button"
-                          onClick={() => deleteMessage(item.id)}
-                          aria-label={`Delete message: ${item.text}`}
-                          className="rounded px-1 py-0.5 underline decoration-plum/30 underline-offset-2 transition hover:text-plum focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
-                        >
-                          Delete
-                        </button>
-                      )}
+                      <div
+                        className={`mt-1 flex items-center gap-2 text-xs text-plum-muted ${
+                          isYou ? 'justify-end' : 'justify-start'
+                        }`}
+                      >
+                        <span>
+                          {isYou ? 'You' : 'Friend'} · {item.time}
+                        </span>
+
+                        {isYou && (
+                          <button
+                            type="button"
+                            onClick={() => deleteMessage(item.id)}
+                            aria-label={`Delete message: ${item.text}`}
+                            className="rounded px-1 py-0.5 underline decoration-plum/30 underline-offset-2 transition hover:text-plum focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-plum-muted"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })
+                )
+              })}
+            </>
           )}
 
           <div ref={messagesEndRef} />
