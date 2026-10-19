@@ -21,6 +21,17 @@ type ServerMessage = {
   createdAt: string
 }
 
+type Participant = {
+  id: string
+  name: string
+}
+
+type TypingUpdate = {
+  participantId: string
+  participantName: string
+  isTyping: boolean
+}
+
 type ChatRoomProps = {
   roomCode: string
   onLeave: () => void
@@ -29,8 +40,10 @@ type ChatRoomProps = {
 type ServerToClientEvents = {
   'room:joined': (data: { roomCode: string }) => void
   'room:members': (data: { count: number }) => void
+  'room:participants': (participants: Participant[]) => void
   'room:error': (message: string) => void
   'message:new': (message: ServerMessage) => void
+  'typing:update': (data: TypingUpdate) => void
 }
 
 type ClientToServerEvents = {
@@ -40,6 +53,8 @@ type ClientToServerEvents = {
     message: { id: string; text: string; senderId: string },
     callback?: (result: { ok: boolean; error?: string }) => void,
   ) => void
+  'typing:start': (roomCode: string) => void
+  'typing:stop': (roomCode: string) => void
 }
 
 type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>
@@ -94,10 +109,27 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   const [shareLabel, setShareLabel] = useState('Share invite link')
   const [connectionStatus, setConnectionStatus] = useState('Connecting…')
   const [memberCount, setMemberCount] = useState(0)
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [typingUsers, setTypingUsers] = useState<TypingUpdate[]>([])
   const [roomError, setRoomError] = useState('')
+
   const socketRef = useRef<ChatSocket | null>(null)
   const senderId = useRef(getSenderId()).current
   const bottomRef = useRef<HTMLDivElement>(null)
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isTypingRef = useRef(false)
+
+  const stopTyping = useCallback(() => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+      typingTimeoutRef.current = null
+    }
+
+    if (isTypingRef.current) {
+      socketRef.current?.emit('typing:stop', roomCode)
+      isTypingRef.current = false
+    }
+  }, [roomCode])
 
   useEffect(() => {
     const socket: ChatSocket = io(SERVER_URL)
@@ -106,13 +138,23 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     socket.on('connect', () => {
       setConnectionStatus('Connected')
       setRoomError('')
-      setJoined(false)
+
+      const savedName = localStorage.getItem(NAME_KEY)?.trim()
+
+      if (savedName) {
+        setDisplayName(savedName)
+        setNameInput(savedName)
+        socket.emit('room:join', { roomCode, senderName: savedName })
+      }
     })
 
     socket.on('disconnect', () => {
       setConnectionStatus('Reconnecting…')
       setMemberCount(0)
+      setParticipants([])
+      setTypingUsers([])
       setJoined(false)
+      isTypingRef.current = false
     })
 
     socket.on('connect_error', () => {
@@ -124,8 +166,27 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
       setRoomError('')
     })
 
-    socket.on('room:members', ({ count }) => setMemberCount(count))
+    socket.on('room:members', ({ count }) => {
+      setMemberCount(count)
+    })
+
+    socket.on('room:participants', (currentParticipants) => {
+      setParticipants(currentParticipants)
+    })
+
     socket.on('room:error', setRoomError)
+
+    socket.on('typing:update', (update) => {
+      if (update.participantId === socket.id) return
+
+      setTypingUsers((current) => {
+        const withoutUser = current.filter(
+          (user) => user.participantId !== update.participantId,
+        )
+
+        return update.isTyping ? [...withoutUser, update] : withoutUser
+      })
+    })
 
     socket.on('message:new', (incoming) => {
       if (incoming.roomCode !== roomCode) return
@@ -143,23 +204,19 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           ? current
           : [...current, received],
       )
+
+      setTypingUsers((current) =>
+        current.filter((user) => user.participantId !== incoming.senderId),
+      )
     })
 
     return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
       if (socket.connected) socket.emit('room:leave', roomCode)
       socket.disconnect()
       socketRef.current = null
     }
   }, [roomCode])
-
-  useEffect(() => {
-    if (!joined || !displayName.trim()) return
-
-    socketRef.current?.emit('room:join', {
-      roomCode,
-      senderName: displayName,
-    })
-  }, [displayName, joined, roomCode])
 
   useEffect(() => {
     localStorage.setItem(
@@ -170,18 +227,22 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, searchQuery])
+  }, [messages, searchQuery, typingUsers])
 
   const leaveRoom = useCallback(() => {
+    stopTyping()
+
     const socket = socketRef.current
     if (socket?.connected) socket.emit('room:leave', roomCode)
+
     onLeave()
-  }, [onLeave, roomCode])
+  }, [onLeave, roomCode, stopTyping])
 
   function joinWithName(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     const name = nameInput.trim().slice(0, 24)
+
     if (!name) {
       setRoomError('Please enter your display name.')
       return
@@ -192,10 +253,36 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     setRoomError('')
 
     const socket = socketRef.current
+
     if (socket?.connected) {
       socket.emit('room:join', { roomCode, senderName: name })
     } else {
       setRoomError('Connecting to the server. Please try again shortly.')
+    }
+  }
+
+  function handleMessageChange(value: string) {
+    setMessage(value)
+
+    const socket = socketRef.current
+
+    if (!joined || !socket?.connected) return
+
+    if (value.trim()) {
+      if (!isTypingRef.current) {
+        socket.emit('typing:start', roomCode)
+        isTypingRef.current = true
+      }
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+
+      typingTimeoutRef.current = setTimeout(() => {
+        socket.emit('typing:stop', roomCode)
+        isTypingRef.current = false
+        typingTimeoutRef.current = null
+      }, 1200)
+    } else {
+      stopTyping()
     }
   }
 
@@ -209,6 +296,8 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
       if (!joined) setRoomError('Join the room before sending messages.')
       return
     }
+
+    stopTyping()
 
     socket.emit(
       'message:send',
@@ -265,9 +354,8 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     const query = searchQuery.trim()
     if (!query) return text
 
-    return text
-      .split(new RegExp(`(${escapeRegExp(query)})`, 'gi'))
-      .map((part, index) =>
+    return text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi')).map(
+      (part, index) =>
         part.toLowerCase() === query.toLowerCase() ? (
           <mark key={index} className="rounded bg-plum-light text-plum">
             {part}
@@ -275,7 +363,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         ) : (
           part
         ),
-      )
+    )
   }
 
   if (connectionStatus === 'Server unavailable') {
@@ -301,13 +389,16 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           onSubmit={joinWithName}
           className="w-full max-w-md rounded-2xl border border-plum/10 bg-white/70 p-8"
         >
-          <h1 className="text-4xl font-bold tracking-tight text-center">
+          <h1 className="text-center text-4xl font-bold tracking-tight">
             Chatty
           </h1>
           <p className="mt-3 text-center text-plum-soft">
             You're joining room <strong>{roomCode}</strong>
           </p>
-          <label htmlFor="display-name" className="mt-8 block text-sm font-medium">
+          <label
+            htmlFor="display-name"
+            className="mt-8 block text-sm font-medium"
+          >
             What should we call you?
           </label>
           <input
@@ -371,6 +462,27 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           </div>
         </header>
 
+        <div className="border-b border-plum/10 bg-white/40 px-4 py-3 sm:px-6">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-plum-soft">
+            Online now ({participants.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {participants.map((participant) => (
+              <span
+                key={participant.id}
+                className="inline-flex items-center gap-2 rounded-full border border-plum/10 bg-white px-3 py-1.5 text-sm"
+              >
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+                {participant.name}
+                {participant.id === socketRef.current?.id ? ' (you)' : ''}
+              </span>
+            ))}
+            {participants.length === 0 && (
+              <span className="text-xs text-plum-muted">Loading members…</span>
+            )}
+          </div>
+        </div>
+
         {roomError && (
           <p role="alert" className="px-4 pt-3 text-sm text-red-700 sm:px-6">
             {roomError}
@@ -421,7 +533,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                       {renderMessageText(item.text)}
                     </p>
                   </div>
-                  {item.senderId === senderId && (
+                  {item.senderId === socketRef.current?.id && (
                     <button
                       type="button"
                       onClick={() => deleteMessage(item.id)}
@@ -436,6 +548,14 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
               </article>
             ))
           )}
+
+          {typingUsers.length > 0 && (
+            <p aria-live="polite" className="text-xs italic text-plum-soft">
+              {typingUsers.map((user) => user.participantName).join(', ')}{' '}
+              {typingUsers.length === 1 ? 'is' : 'are'} typing…
+            </p>
+          )}
+
           <div ref={bottomRef} />
         </div>
 
@@ -452,7 +572,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           <form onSubmit={sendMessage} className="flex min-w-0 gap-2">
             <input
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => handleMessageChange(event.target.value)}
               placeholder="Write a message…"
               aria-label="Write a message"
               maxLength={2000}
