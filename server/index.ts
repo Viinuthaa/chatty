@@ -3,6 +3,8 @@ import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, resolve } from 'path'
 
 const app = express()
 app.use(cors())
@@ -35,9 +37,58 @@ type Participant = {
   name: string
 }
 
+type SavedHistory = Record<string, ChatMessage[]>
+
+const historyFile = resolve(process.cwd(), 'server', 'chat-history.json')
+
 const rooms = new Map<string, ChatMessage[]>()
 const participants = new Map<string, Map<string, Participant>>()
 const typingUsers = new Map<string, Set<string>>()
+
+function loadHistory() {
+  if (!existsSync(historyFile)) return
+
+  try {
+    const content = readFileSync(historyFile, 'utf8')
+    const saved = JSON.parse(content) as SavedHistory
+
+    for (const [roomCode, messages] of Object.entries(saved)) {
+      if (
+        Array.isArray(messages) &&
+        messages.every(
+          message =>
+            message &&
+            typeof message.id === 'string' &&
+            typeof message.text === 'string' &&
+            typeof message.senderId === 'string' &&
+            typeof message.senderName === 'string' &&
+            typeof message.createdAt === 'string',
+        )
+      ) {
+        rooms.set(roomCode, messages)
+      }
+    }
+
+    console.log(`Loaded saved chat history for ${rooms.size} room(s).`)
+  } catch (error) {
+    console.error('Could not load saved chat history:', error)
+  }
+}
+
+function saveHistory() {
+  try {
+    const directory = dirname(historyFile)
+    mkdirSync(directory, { recursive: true })
+
+    const saved: SavedHistory = Object.fromEntries(rooms.entries())
+
+    writeFileSync(historyFile, JSON.stringify(saved, null, 2), 'utf8')
+  } catch (error) {
+    console.error('Could not save chat history:', error)
+  }
+}
+
+loadHistory()
 
 function getRoom(code: string) {
   if (!rooms.has(code)) rooms.set(code, [])
@@ -142,39 +193,44 @@ io.on('connection', socket => {
       }
 
       getRoom(roomCode).push(message)
+      saveHistory()
+
       io.to(roomCode).emit('message:new', message)
       callback?.({ ok: true })
     },
   )
 
-  socket.on('message:delete', (data: {
-    roomCode: string
-    messageId: string
-  }) => {
-    const roomCode = String(data?.roomCode || '').trim().toUpperCase()
-    const messageId = String(data?.messageId || '')
+  socket.on(
+    'message:delete',
+    (data: { roomCode: string; messageId: string }) => {
+      const roomCode = String(data?.roomCode || '').trim().toUpperCase()
+      const messageId = String(data?.messageId || '')
 
-    if (!roomCode || !messageId || !socket.rooms.has(roomCode)) return
+      if (!roomCode || !messageId || !socket.rooms.has(roomCode)) return
 
-    const messages = getRoom(roomCode)
-    const message = messages.find(item => item.id === messageId)
+      const messages = getRoom(roomCode)
+      const message = messages.find(item => item.id === messageId)
 
-    if (!message || message.senderId !== socket.id) return
+      if (!message || message.senderId !== socket.id) return
 
-    rooms.set(
-      roomCode,
-      messages.filter(item => item.id !== messageId),
-    )
+      rooms.set(
+        roomCode,
+        messages.filter(item => item.id !== messageId),
+      )
 
-    // Broadcast deletion to every browser in this room.
-    io.to(roomCode).emit('message:deleted', { messageId, roomCode })
-  })
+      saveHistory()
+
+      io.to(roomCode).emit('message:deleted', { messageId, roomCode })
+    },
+  )
 
   function updateTyping(isTyping: boolean) {
     const roomCode = socket.data.roomCode as string | undefined
     if (!roomCode || !socket.rooms.has(roomCode)) return
 
-    if (!typingUsers.has(roomCode)) typingUsers.set(roomCode, new Set())
+    if (!typingUsers.has(roomCode)) {
+      typingUsers.set(roomCode, new Set())
+    }
 
     const typing = typingUsers.get(roomCode)!
 
