@@ -98,6 +98,23 @@ function getSenderId() {
   return id
 }
 
+function getClearBefore(roomCode: string): number {
+  const value = localStorage.getItem(
+    `chatty-cleared-before-${roomCode}`,
+  )
+
+  if (!value) return 0
+
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function isAfterClear(message: ServerMessage | Message, roomCode: string) {
+  const clearedBefore = getClearBefore(roomCode)
+
+  return new Date(message.createdAt).getTime() > clearedBefore
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -197,10 +214,14 @@ export default function ChatRoom({
     socket.on('room:error', setRoomError)
 
     socket.on('room:messages', incoming => {
+      const visibleMessages = incoming.filter(item =>
+        isAfterClear(item, roomCode),
+      )
+
       setMessages(current => {
         const merged = [...current]
 
-        incoming.forEach(item => {
+        visibleMessages.forEach(item => {
           if (!merged.some(existing => existing.id === item.id)) {
             merged.push({
               id: item.id,
@@ -225,13 +246,15 @@ export default function ChatRoom({
     })
 
     socket.on('history:older:result', ({ items, hasMore }) => {
-      const olderMessages: Message[] = items.map(item => ({
-        id: item.id,
-        text: item.text,
-        senderId: item.senderId,
-        sender: item.senderName,
-        createdAt: item.createdAt,
-      }))
+      const olderMessages: Message[] = items
+        .filter(item => isAfterClear(item, roomCode))
+        .map(item => ({
+          id: item.id,
+          text: item.text,
+          senderId: item.senderId,
+          sender: item.senderName,
+          createdAt: item.createdAt,
+        }))
 
       setMessages(current => {
         const existingIds = new Set(current.map(item => item.id))
@@ -266,6 +289,14 @@ export default function ChatRoom({
     socket.on('message:new', incoming => {
       if (incoming.roomCode !== roomCode) return
 
+      setTypingUsers(current =>
+        current.filter(
+          user => user.participantId !== incoming.senderId,
+        ),
+      )
+
+      if (!isAfterClear(incoming, roomCode)) return
+
       const received: Message = {
         id: incoming.id,
         text: incoming.text,
@@ -278,12 +309,6 @@ export default function ChatRoom({
         current.some(item => item.id === received.id)
           ? current
           : [...current, received],
-      )
-
-      setTypingUsers(current =>
-        current.filter(
-          user => user.participantId !== incoming.senderId,
-        ),
       )
     })
 
@@ -472,13 +497,20 @@ export default function ChatRoom({
   }
 
   function clearChat() {
-    if (
-      window.confirm(
-        'Clear all messages in this chat on this device?',
-      )
-    ) {
-      setMessages([])
-    }
+    const confirmed = window.confirm(
+      'Hide the existing messages on this device? Other participants will still be able to see them.',
+    )
+
+    if (!confirmed) return
+
+    localStorage.setItem(
+      `chatty-cleared-before-${roomCode}`,
+      new Date().toISOString(),
+    )
+
+    setMessages([])
+    setSearchQuery('')
+    setRoomError('')
   }
 
   async function shareInviteLink() {
