@@ -39,6 +39,7 @@ type Participant = {
 
 type SavedHistory = Record<string, ChatMessage[]>
 
+const HISTORY_LIMIT = 50
 const historyFile = resolve(process.cwd(), 'server', 'chat-history.json')
 
 const rooms = new Map<string, ChatMessage[]>()
@@ -133,9 +134,46 @@ io.on('connection', socket => {
         name: senderName,
       })
 
+      const allMessages = getRoom(roomCode)
+      const latestMessages = allMessages.slice(-HISTORY_LIMIT)
+
       socket.emit('room:joined', { roomCode })
-      socket.emit('room:messages', getRoom(roomCode))
+      socket.emit('room:messages', latestMessages)
+      socket.emit('history:status', {
+        hasMore: allMessages.length > latestMessages.length,
+      })
+
       broadcastParticipants(roomCode)
+    },
+  )
+
+  socket.on(
+    'history:older',
+    (data: { roomCode: string; beforeId: string }) => {
+      const roomCode = String(data?.roomCode || '').trim().toUpperCase()
+      const beforeId = String(data?.beforeId || '')
+
+      if (!roomCode || !beforeId || !socket.rooms.has(roomCode)) return
+
+      const allMessages = getRoom(roomCode)
+      const beforeIndex = allMessages.findIndex(
+        message => message.id === beforeId,
+      )
+
+      if (beforeIndex <= 0) {
+        socket.emit('history:older:result', {
+          items: [],
+          hasMore: false,
+        })
+        return
+      }
+
+      const startIndex = Math.max(0, beforeIndex - HISTORY_LIMIT)
+
+      socket.emit('history:older:result', {
+        items: allMessages.slice(startIndex, beforeIndex),
+        hasMore: startIndex > 0,
+      })
     },
   )
 
@@ -167,19 +205,28 @@ io.on('connection', socket => {
       const text = String(data?.text || '').trim()
 
       if (!roomCode || !socket.rooms.has(roomCode)) {
-        callback?.({ ok: false, error: 'Join a room before sending.' })
+        callback?.({
+          ok: false,
+          error: 'Join a room before sending.',
+        })
         return
       }
 
       if (!text) {
-        callback?.({ ok: false, error: 'Message cannot be empty.' })
+        callback?.({
+          ok: false,
+          error: 'Message cannot be empty.',
+        })
         return
       }
 
       const participant = getParticipants(roomCode).get(socket.id)
 
       if (!participant) {
-        callback?.({ ok: false, error: 'Please rejoin the room.' })
+        callback?.({
+          ok: false,
+          error: 'Please rejoin the room.',
+        })
         return
       }
 
@@ -220,12 +267,16 @@ io.on('connection', socket => {
 
       saveHistory()
 
-      io.to(roomCode).emit('message:deleted', { messageId, roomCode })
+      io.to(roomCode).emit('message:deleted', {
+        messageId,
+        roomCode,
+      })
     },
   )
 
   function updateTyping(isTyping: boolean) {
     const roomCode = socket.data.roomCode as string | undefined
+
     if (!roomCode || !socket.rooms.has(roomCode)) return
 
     if (!typingUsers.has(roomCode)) {
