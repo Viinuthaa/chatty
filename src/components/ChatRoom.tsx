@@ -32,17 +32,14 @@ type TypingUpdate = {
   isTyping: boolean
 }
 
-type ChatRoomProps = {
-  roomCode: string
-  onLeave: () => void
-}
-
 type ServerToClientEvents = {
   'room:joined': (data: { roomCode: string }) => void
   'room:members': (data: { count: number }) => void
-  'room:participants': (participants: Participant[]) => void
+  'room:participants': (items: Participant[]) => void
   'room:error': (message: string) => void
+  'room:messages': (items: ServerMessage[]) => void
   'message:new': (message: ServerMessage) => void
+  'message:deleted': (data: { messageId: string; roomCode: string }) => void
   'typing:update': (data: TypingUpdate) => void
 }
 
@@ -50,14 +47,20 @@ type ClientToServerEvents = {
   'room:join': (data: { roomCode: string; senderName: string }) => void
   'room:leave': (roomCode: string) => void
   'message:send': (
-    message: { id: string; text: string; senderId: string },
+    data: { id: string; text: string; senderId: string },
     callback?: (result: { ok: boolean; error?: string }) => void,
   ) => void
+  'message:delete': (data: { roomCode: string; messageId: string }) => void
   'typing:start': (roomCode: string) => void
   'typing:stop': (roomCode: string) => void
 }
 
 type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>
+
+type ChatRoomProps = {
+  roomCode: string
+  onLeave: () => void
+}
 
 const SERVER_URL = 'http://localhost:3001'
 const NAME_KEY = 'chatty-display-name'
@@ -77,13 +80,12 @@ function getSenderId() {
 function loadMessages(roomCode: string): Message[] {
   try {
     const stored = localStorage.getItem(`chatty-messages-${roomCode}`)
-
     if (stored) {
       const parsed: unknown = JSON.parse(stored)
       if (Array.isArray(parsed)) return parsed as Message[]
     }
   } catch {
-    // Start with an empty conversation if stored data cannot be read.
+    // Ignore invalid local data.
   }
 
   return []
@@ -93,7 +95,7 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
+export default function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   const [displayName, setDisplayName] = useState(
     () => localStorage.getItem(NAME_KEY) ?? '',
   )
@@ -101,9 +103,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     () => localStorage.getItem(NAME_KEY) ?? '',
   )
   const [joined, setJoined] = useState(false)
-  const [messages, setMessages] = useState<Message[]>(() =>
-    loadMessages(roomCode),
-  )
+  const [messages, setMessages] = useState<Message[]>(() => loadMessages(roomCode))
   const [message, setMessage] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [shareLabel, setShareLabel] = useState('Share invite link')
@@ -166,29 +166,43 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
       setRoomError('')
     })
 
-    socket.on('room:members', ({ count }) => {
-      setMemberCount(count)
-    })
-
-    socket.on('room:participants', (currentParticipants) => {
-      setParticipants(currentParticipants)
-    })
-
+    socket.on('room:members', ({ count }) => setMemberCount(count))
+    socket.on('room:participants', setParticipants)
     socket.on('room:error', setRoomError)
 
-    socket.on('typing:update', (update) => {
-      if (update.participantId === socket.id) return
+    socket.on('room:messages', incoming => {
+      setMessages(current => {
+        const merged = [...current]
 
-      setTypingUsers((current) => {
-        const withoutUser = current.filter(
-          (user) => user.participantId !== update.participantId,
-        )
+        incoming.forEach(item => {
+          if (!merged.some(existing => existing.id === item.id)) {
+            merged.push({
+              id: item.id,
+              text: item.text,
+              senderId: item.senderId,
+              sender: item.senderName,
+              createdAt: item.createdAt,
+            })
+          }
+        })
 
-        return update.isTyping ? [...withoutUser, update] : withoutUser
+        return merged
       })
     })
 
-    socket.on('message:new', (incoming) => {
+    socket.on('typing:update', update => {
+      if (update.participantId === socket.id) return
+
+      setTypingUsers(current => {
+        const others = current.filter(
+          user => user.participantId !== update.participantId,
+        )
+
+        return update.isTyping ? [...others, update] : others
+      })
+    })
+
+    socket.on('message:new', incoming => {
       if (incoming.roomCode !== roomCode) return
 
       const received: Message = {
@@ -199,15 +213,21 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
         createdAt: incoming.createdAt,
       }
 
-      setMessages((current) =>
-        current.some((item) => item.id === received.id)
+      setMessages(current =>
+        current.some(item => item.id === received.id)
           ? current
           : [...current, received],
       )
 
-      setTypingUsers((current) =>
-        current.filter((user) => user.participantId !== incoming.senderId),
+      setTypingUsers(current =>
+        current.filter(user => user.participantId !== incoming.senderId),
       )
+    })
+
+    socket.on('message:deleted', ({ messageId, roomCode: deletedRoom }) => {
+      if (deletedRoom !== roomCode) return
+
+      setMessages(current => current.filter(item => item.id !== messageId))
     })
 
     return () => {
@@ -219,10 +239,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
   }, [roomCode])
 
   useEffect(() => {
-    localStorage.setItem(
-      `chatty-messages-${roomCode}`,
-      JSON.stringify(messages),
-    )
+    localStorage.setItem(`chatty-messages-${roomCode}`, JSON.stringify(messages))
   }, [messages, roomCode])
 
   useEffect(() => {
@@ -231,8 +248,8 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
   const leaveRoom = useCallback(() => {
     stopTyping()
-
     const socket = socketRef.current
+
     if (socket?.connected) socket.emit('room:leave', roomCode)
 
     onLeave()
@@ -263,7 +280,6 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
 
   function handleMessageChange(value: string) {
     setMessage(value)
-
     const socket = socketRef.current
 
     if (!joined || !socket?.connected) return
@@ -302,7 +318,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     socket.emit(
       'message:send',
       { id: crypto.randomUUID(), text, senderId },
-      (result) => {
+      result => {
         if (!result.ok) {
           setRoomError(result.error ?? 'Could not send the message.')
         } else {
@@ -313,8 +329,23 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     )
   }
 
-  function deleteMessage(id: string) {
-    setMessages((current) => current.filter((item) => item.id !== id))
+  function deleteMessage(item: Message) {
+    const socket = socketRef.current
+
+    if (!socket?.connected || !joined) {
+      setRoomError('Reconnect to the room before deleting messages.')
+      return
+    }
+
+    if (item.senderId !== socket.id) {
+      setRoomError('You can only delete messages you sent.')
+      return
+    }
+
+    socket.emit('message:delete', {
+      roomCode,
+      messageId: item.id,
+    })
   }
 
   function clearChat() {
@@ -346,7 +377,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     window.setTimeout(() => setShareLabel('Share invite link'), 2000)
   }
 
-  const filteredMessages = messages.filter((item) =>
+  const filteredMessages = messages.filter(item =>
     item.text.toLowerCase().includes(searchQuery.trim().toLowerCase()),
   )
 
@@ -389,32 +420,30 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           onSubmit={joinWithName}
           className="w-full max-w-md rounded-2xl border border-plum/10 bg-white/70 p-8"
         >
-          <h1 className="text-center text-4xl font-bold tracking-tight">
-            Chatty
-          </h1>
+          <h1 className="text-center text-4xl font-bold tracking-tight">Chatty</h1>
           <p className="mt-3 text-center text-plum-soft">
             You're joining room <strong>{roomCode}</strong>
           </p>
-          <label
-            htmlFor="display-name"
-            className="mt-8 block text-sm font-medium"
-          >
+
+          <label htmlFor="display-name" className="mt-8 block text-sm font-medium">
             What should we call you?
           </label>
           <input
             id="display-name"
             value={nameInput}
-            onChange={(event) => setNameInput(event.target.value)}
+            onChange={event => setNameInput(event.target.value)}
             placeholder="Enter your name"
             maxLength={24}
             autoComplete="nickname"
             className="mt-2 w-full rounded-xl border border-plum/20 bg-white px-4 py-3 outline-none focus:border-plum"
           />
+
           {roomError && (
             <p role="alert" className="mt-3 text-sm text-red-700">
               {roomError}
             </p>
           )}
+
           <Button type="submit" className="mt-5">
             Join Room
           </Button>
@@ -440,10 +469,10 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
               Room <span className="font-semibold tracking-widest">{roomCode}</span>
             </p>
             <p className="mt-1 text-xs text-plum-muted">
-              {connectionStatus} · {memberCount}{' '}
-              {memberCount === 1 ? 'member' : 'members'} · {displayName}
+              {connectionStatus} · {memberCount} {memberCount === 1 ? 'member' : 'members'} · {displayName}
             </p>
           </div>
+
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
@@ -467,7 +496,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
             Online now ({participants.length})
           </p>
           <div className="flex flex-wrap gap-2">
-            {participants.map((participant) => (
+            {participants.map(participant => (
               <span
                 key={participant.id}
                 className="inline-flex items-center gap-2 rounded-full border border-plum/10 bg-white px-3 py-1.5 text-sm"
@@ -493,7 +522,7 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
           <input
             type="search"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={event => setSearchQuery(event.target.value)}
             placeholder="Search messages…"
             aria-label="Search messages"
             className="w-full rounded-xl border border-plum/15 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-plum"
@@ -507,51 +536,54 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
                 {searchQuery ? 'No matching messages' : 'Your room is ready'}
               </p>
               <p className="mt-1 text-sm text-plum-soft">
-                {searchQuery
-                  ? 'Try another search.'
-                  : 'Send a message to start the conversation.'}
+                {searchQuery ? 'Try another search.' : 'Send a message to start the conversation.'}
               </p>
             </div>
           ) : (
-            filteredMessages.map((item) => (
-              <article
-                key={item.id}
-                className="group rounded-xl bg-plum-light/60 p-3 sm:p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-plum-soft">
-                      {item.sender}
-                      <span className="ml-2 font-normal">
-                        {new Date(item.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    </p>
-                    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
-                      {renderMessageText(item.text)}
-                    </p>
+            filteredMessages.map(item => {
+              const ownMessage = item.senderId === socketRef.current?.id
+
+              return (
+                <article
+                  key={item.id}
+                  className="rounded-xl bg-plum-light/60 p-3 sm:p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-plum-soft">
+                        {item.sender}
+                        <span className="ml-2 font-normal">
+                          {new Date(item.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
+                        {renderMessageText(item.text)}
+                      </p>
+                    </div>
+
+                    {ownMessage && (
+                      <button
+                        type="button"
+                        onClick={() => deleteMessage(item)}
+                        aria-label="Delete message"
+                        title="Delete message"
+                        className="shrink-0 rounded-lg border border-plum/15 bg-white px-2.5 py-1.5 text-xs text-plum-soft transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
-                  {item.senderId === socketRef.current?.id && (
-                    <button
-                      type="button"
-                      onClick={() => deleteMessage(item.id)}
-                      aria-label="Delete message"
-                      title="Delete message"
-                      className="rounded-lg px-2 py-1 text-xs text-plum-soft transition hover:bg-white hover:text-red-700"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))
+                </article>
+              )
+            })
           )}
 
           {typingUsers.length > 0 && (
             <p aria-live="polite" className="text-xs italic text-plum-soft">
-              {typingUsers.map((user) => user.participantName).join(', ')}{' '}
+              {typingUsers.map(user => user.participantName).join(', ')}{' '}
               {typingUsers.length === 1 ? 'is' : 'are'} typing…
             </p>
           )}
@@ -569,10 +601,11 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
               Clear chat on this device
             </button>
           </div>
+
           <form onSubmit={sendMessage} className="flex min-w-0 gap-2">
             <input
               value={message}
-              onChange={(event) => handleMessageChange(event.target.value)}
+              onChange={event => handleMessageChange(event.target.value)}
               placeholder="Write a message…"
               aria-label="Write a message"
               maxLength={2000}
@@ -594,5 +627,3 @@ function ChatRoom({ roomCode, onLeave }: ChatRoomProps) {
     </main>
   )
 }
-
-export default ChatRoom
