@@ -3,24 +3,45 @@ import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'fs'
 import { dirname, resolve } from 'path'
 
 const app = express()
-app.use(cors())
+
+const PORT = Number(process.env.PORT) || 3001
+
+const allowedOrigins = (
+  process.env.CLIENT_URL ||
+  'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://localhost:5175'
+)
+  .split(',')
+  .map(origin => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
+      callback(null, true)
+      return
+    }
+
+    callback(new Error(`Origin not allowed by CORS: ${origin}`))
+  },
+  methods: ['GET', 'POST'],
+}
+
+app.use(cors(corsOptions))
+app.use(express.json())
 
 const httpServer = createServer(app)
 
 const io = new Server(httpServer, {
-  cors: {
-    origin: [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:5174',
-      'http://localhost:5175',
-    ],
-    methods: ['GET', 'POST'],
-  },
+  cors: corsOptions,
 })
 
 type ChatMessage = {
@@ -70,7 +91,7 @@ function loadHistory() {
       }
     }
 
-    console.log(`Loaded saved chat history for ${rooms.size} room(s).`)
+    console.log(`Loaded saved history for ${rooms.size} room(s).`)
   } catch (error) {
     console.error('Could not load saved chat history:', error)
   }
@@ -78,8 +99,7 @@ function loadHistory() {
 
 function saveHistory() {
   try {
-    const directory = dirname(historyFile)
-    mkdirSync(directory, { recursive: true })
+    mkdirSync(dirname(historyFile), { recursive: true })
 
     const saved: SavedHistory = Object.fromEntries(rooms.entries())
 
@@ -103,6 +123,7 @@ function getParticipants(code: string) {
 
 function broadcastParticipants(code: string) {
   const members = Array.from(getParticipants(code).values())
+
   io.to(code).emit('room:participants', members)
   io.to(code).emit('room:members', { count: members.length })
 }
@@ -205,28 +226,19 @@ io.on('connection', socket => {
       const text = String(data?.text || '').trim()
 
       if (!roomCode || !socket.rooms.has(roomCode)) {
-        callback?.({
-          ok: false,
-          error: 'Join a room before sending.',
-        })
+        callback?.({ ok: false, error: 'Join a room before sending.' })
         return
       }
 
       if (!text) {
-        callback?.({
-          ok: false,
-          error: 'Message cannot be empty.',
-        })
+        callback?.({ ok: false, error: 'Message cannot be empty.' })
         return
       }
 
       const participant = getParticipants(roomCode).get(socket.id)
 
       if (!participant) {
-        callback?.({
-          ok: false,
-          error: 'Please rejoin the room.',
-        })
+        callback?.({ ok: false, error: 'Please rejoin the room.' })
         return
       }
 
@@ -319,8 +331,7 @@ app.get('/', (_req, res) => {
   res.send('Chatty server is running')
 })
 
-const PORT = Number(process.env.PORT) || 3001
-
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Chatty server running on port ${PORT}`)
+  console.log(`Allowed frontend origins: ${allowedOrigins.join(', ')}`)
 })

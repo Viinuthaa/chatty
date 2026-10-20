@@ -83,7 +83,9 @@ type ChatRoomProps = {
   onLeave: () => void
 }
 
-const SERVER_URL = 'http://localhost:3001'
+const SERVER_URL =
+  import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
+
 const NAME_KEY = 'chatty-display-name'
 
 function getSenderId() {
@@ -109,10 +111,11 @@ function getClearBefore(roomCode: string): number {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-function isAfterClear(message: ServerMessage | Message, roomCode: string) {
-  const clearedBefore = getClearBefore(roomCode)
-
-  return new Date(message.createdAt).getTime() > clearedBefore
+function isAfterClear(
+  message: ServerMessage | Message,
+  roomCode: string,
+) {
+  return new Date(message.createdAt).getTime() > getClearBefore(roomCode)
 }
 
 function escapeRegExp(value: string) {
@@ -327,8 +330,6 @@ export default function ChatRoom({
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current)
       }
-
-      setLoadingOlderMessages(false)
 
       if (socket.connected) {
         socket.emit('room:leave', roomCode)
