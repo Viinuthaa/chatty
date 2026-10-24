@@ -1,75 +1,45 @@
-# React + TypeScript + Vite
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# Chatty 💬
 
-Currently, two official plugins are available:
+Chatty is a real-time chat application that lets users create chat rooms, share a unique room code or invite link, and chat with friends. **No login or sign-up required.**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+![Chatty Screenshot](screenshot.png)
 
-## React Compiler
+## Live Demo
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+🔗 Live Demo: https://chatty-live.vercel.app
 
-## Expanding the ESLint configuration
+## Features
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Real-time messaging:** Send and receive messages instantly using Socket.IO.
+- **Create and join rooms:** Start or join conversations using unique room codes.
+- **Shareable invite links:** Invite friends to a room with a link.
+- **Online members:** View the participants currently in a room.
+- **Typing indicators:** See when other participants are typing.
+- **Message history:** View recent messages and load older conversations.
+- **Message search:** Find specific messages in a conversation.
+- **Message deletion:** Delete your own messages.
+- **Responsive interface:** Chat across desktop and mobile screens.
+- **No authentication:** Start chatting without creating an account.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## How It Works
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+1. Open Chatty without signing up or logging in.
+2. Create a chat room or join an existing room using its code.
+3. Choose a display name and share the room code or invite link with friends.
+4. Send messages and chat in real time.
+5. View participants, typing indicators, and previous messages.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Tech Stack
 
-```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Node.js
+- Express
+- Socket.IO
+- PostgreSQL
+- Neon
+- Vercel
+- Render
