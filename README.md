@@ -1,5 +1,5 @@
 
-# Chatty 💬
+# Chatty 
 
 Chatty is a real-time chat application that lets users create chat rooms, share a unique room code or invite link, and chat with friends. **No login or sign-up required.**
 
@@ -32,14 +32,6 @@ Chatty is a real-time chat application that lets users create chat rooms, share 
 
 ## Tech Stack
 
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- Node.js
-- Express
-- Socket.IO
-- PostgreSQL
-- Neon
-- Vercel
-- Render
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS
+- **Backend & Real-Time Communication:** Node.js, Express, Socket.IO
+- **Database & Deployment:** PostgreSQL (Neon), Vercel, Render
